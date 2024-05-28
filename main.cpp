@@ -6,11 +6,45 @@
 #include "model.h"
 #include "geometry.h"
 
-const TGAColor white = TGAColor(255, 255, 255, 255);
-const TGAColor red = TGAColor(255, 0, 0, 255);
-Model *model = NULL;
 const int width = 800;
 const int height = 800;
+const int depth = 255;
+
+Model *model = NULL;
+int *zbuffer = NULL;
+Vec3f light_dir(0, 0, -1);
+Vec3f camera(0, 0, 3);
+
+const TGAColor white = TGAColor(255, 255, 255, 255);
+const TGAColor red = TGAColor(255, 0, 0, 255);
+
+Vec3f m2v(Matrix m) // homogenous matrix to vector
+{
+    return Vec3f(m[0][0] / m[3][0], m[1][0] / m[3][0], m[2][0] / m[3][0]);
+}
+
+Matrix v2m(Vec3f v) // vector to homogenous matrix
+{
+    Matrix m(4, 1);
+    m[0][0] = v.x;
+    m[1][0] = v.y;
+    m[2][0] = v.z;
+    m[3][0] = 1.f;
+    return m;
+}
+
+Matrix viewport(int x, int y, int w, int h) // camera viewing screen
+{
+    Matrix m = Matrix::identity(4);
+    m[0][3] = x + w / 2.f;
+    m[1][3] = y + h / 2.f;
+    m[2][3] = depth / 2.f;
+
+    m[0][0] = w / 2.f;
+    m[1][1] = h / 2.f;
+    m[2][2] = depth / 2.f;
+    return m;
+}
 
 void line(Vec2i p0, Vec2i p1, TGAImage &image, TGAColor color)
 {
@@ -59,13 +93,13 @@ Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P)
         s[i][1] = B[i] - A[i];
         s[i][2] = A[i] - P[i];
     }
-    Vec3f u = cross(s[0], s[1]);
+    Vec3f u = s[0] ^ s[1];
     if (std::abs(u[2]) > 1e-2) // dont forget that u[2] is integer. If it is zero then triangle ABC is degenerate
         return Vec3f(1.f - (u.x + u.y) / u.z, u.y / u.z, u.x / u.z);
     return Vec3f(-1, 1, 1); // in this case generate negative coordinates, it will be thrown away by the rasterizator
 }
 
-void triangle(Vec3f *pts, Vec2i *uv, float *zbuffer, TGAImage &image, float intensity)
+void triangle(Vec3f *pts, Vec2i *uv, int *zbuffer, TGAImage &image, float intensity)
 {
     Vec2f bboxmin(std::numeric_limits<float>::max(), std::numeric_limits<float>::max());
     Vec2f bboxmax(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max());
@@ -124,24 +158,31 @@ int main(int argc, char **argv)
     Vec3f light_dir(0, 0, -1); // define light_dir
 
     // initialize zbuffer of distances from screen
-    float *zbuffer = new float[width * height];
-    for (int i = width * height; i--; zbuffer[i] = -std::numeric_limits<float>::max())
-        ;
+    zbuffer = new int[width * height];
+    for (int i = 0; i < width * height; i++)
+    {
+        zbuffer[i] = std::numeric_limits<int>::min();
+    }
+
+    // Draw model
+    Matrix Projection = Matrix::identity(4);
+    Matrix ViewPort = viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
+    Projection[3][2] = -1.f / camera.z; // this coefficient sets projection
 
     TGAImage image(width, height, TGAImage::RGB);
     for (int i = 0; i < model->nfaces(); i++)
     {
         std::vector<int> face = model->face(i);
+        Vec3f screen_coords[3];
         Vec3f world_coords[3];
-        Vec3f pts[3];
         for (int j = 0; j < 3; j++)
         {
             Vec3f v = model->vert(face[j]);
+            screen_coords[j] = m2v(ViewPort * Projection * v2m(v));
             world_coords[j] = v;
-            pts[j] = world2screen(v);
         }
 
-        Vec3f n = cross(world_coords[2] - world_coords[0], world_coords[1] - world_coords[0]);
+        Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
         n.normalize();
         float intensity = n * light_dir;
         if (intensity > 0)
@@ -151,7 +192,7 @@ int main(int argc, char **argv)
             {
                 uv[k] = model->uv(i, k);
             }
-            triangle(pts, uv, zbuffer, image, intensity);
+            triangle(screen_coords, uv, zbuffer, image, intensity);
         }
     }
 
