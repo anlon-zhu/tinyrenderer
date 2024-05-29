@@ -153,12 +153,6 @@ int main(int argc, char **argv)
         Projection[3][2] = -1.f / (eye - center).norm();
         Matrix z = (ViewPort * Projection * ModelView);
 
-        // Debug statements
-        std::cerr << ModelView << std::endl;
-        std::cerr << Projection << std::endl;
-        std::cerr << ViewPort << std::endl;
-        std::cerr << z << std::endl;
-
         // Drawing triangles
         TGAImage image(width, height, TGAImage::RGB);
         for (int i = 0; i < model->nfaces(); i++)
