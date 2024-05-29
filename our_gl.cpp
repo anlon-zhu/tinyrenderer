@@ -3,6 +3,9 @@
 #include <cstdlib>
 #include "our_gl.h"
 
+////////////////////////////////////////////////////////////////////////
+// Matrix Operations for projections
+////////////////////////////////////////////////////////////////////////
 Matrix ModelView;
 Matrix Viewport;
 Matrix Projection;
@@ -10,10 +13,6 @@ int DEPTH;
 IShader::~IShader()
 {
 }
-
-////////////////////////////////////////////////////////////////////////
-// Matrix Operations for projections
-////////////////////////////////////////////////////////////////////////
 void viewport(int x, int y, int w, int h)
 {
     Viewport = Matrix::identity();
@@ -85,15 +84,18 @@ void triangle(Vec4f *pts, IShader &shader, TGAImage &image, TGAImage &zbuffer)
         for (P.y = bboxmin.y; P.y <= bboxmax.y; P.y++)
         {
             Vec3f c = barycentric(proj<2>(pts[0] / pts[0][3]), proj<2>(pts[1] / pts[1][3]), proj<2>(pts[2] / pts[2][3]), proj<2>(P));
-            // pixel depth not included in P for optimization
+            // z vs. P.z for optimization
             float z = pts[0][2] * c.x + pts[1][2] * c.y + pts[2][2] * c.z;
             // pixel UV texture coordinates
             float w = pts[0][3] * c.x + pts[1][3] * c.y + pts[2][3] * c.z;
 
-            // Don't render if outside the triangle or if the z-buffer is closer
+            // Depth and stencil
+            // Don't render if the z-buffer is closer or outside the triangle
             int frag_depth = std::max(0, std::min(DEPTH, int(z / w + .5)));
             if (c.x < 0 || c.y < 0 || c.z < 0 || zbuffer.get(P.x, P.y)[0] > frag_depth)
                 continue;
+
+            // Fragment shader gets color from UV coordinates
             bool discard = shader.fragment(c, color);
 
             if (!discard)
