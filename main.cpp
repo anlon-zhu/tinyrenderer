@@ -1,5 +1,6 @@
 #include <vector>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include "tgaimage.h"
 #include "model.h"
@@ -11,9 +12,13 @@ const int depth = 255;
 
 Model *model = NULL;
 int *zbuffer = NULL;
-Vec3f light_dir(0, 0, -1);
-Vec3f camera(0, 0, 3);
+Vec3f light_dir = Vec3f(1, -1, 1).normalize();
+Vec3f eye(1, 1, 3);
+Vec3f center(0, 0, 0);
 
+////////////////////////////////////////////////////////////////////////
+// Matrix Operations for projections
+////////////////////////////////////////////////////////////////////////
 Vec3f m2v(Matrix m)
 {
     return Vec3f(m[0][0] / m[3][0], m[1][0] / m[3][0], m[2][0] / m[3][0]);
@@ -42,6 +47,25 @@ Matrix viewport(int x, int y, int w, int h)
     return m;
 }
 
+Matrix lookat(Vec3f eye, Vec3f center, Vec3f up)
+{
+    Vec3f z = (eye - center).normalize();
+    Vec3f x = (up ^ z).normalize();
+    Vec3f y = (z ^ x).normalize();
+    Matrix res = Matrix::identity(4);
+    for (int i = 0; i < 3; i++)
+    {
+        res[0][i] = x[i];
+        res[1][i] = y[i];
+        res[2][i] = z[i];
+        res[i][3] = -center[i];
+    }
+    return res;
+}
+
+////////////////////////////////////////////////////////////////////////
+// Triangle Geometry
+////////////////////////////////////////////////////////////////////////
 Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P)
 {
     Vec3f s[2]; // sides
@@ -57,10 +81,11 @@ Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P)
     return Vec3f(-1, 1, 1); // in this case generate negative coordinates, it will be thrown away by the rasterizator
 }
 
-void triangle(Vec3i *pts, Vec2i *uv, TGAImage &image, float intensity, int *zbuffer)
+void triangle(Vec3i *pts, Vec2i *uv, float *intensity, TGAImage &image, int *zbuffer)
 {
     Vec3i t0 = pts[0], t1 = pts[1], t2 = pts[2];
     Vec2i uv0 = uv[0], uv1 = uv[1], uv2 = uv[2];
+    float intensity0 = intensity[0], intensity1 = intensity[1], intensity2 = intensity[2];
 
     if (t0.y == t1.y && t0.y == t2.y)
         return; // I don't care about degenerate triangles
@@ -89,16 +114,21 @@ void triangle(Vec3i *pts, Vec2i *uv, TGAImage &image, float intensity, int *zbuf
             if (zbuffer[idx] < P.z)
             {
                 zbuffer[idx] = P.z;
+                // Interpolating UV color and intensity for this pixel
                 Vec2i uvP = uv0 * bc_screen.x + uv1 * bc_screen.y + uv2 * bc_screen.z;
+                float intensity = intensity0 * bc_screen.x + intensity1 * bc_screen.y + intensity2 * bc_screen.z;
                 TGAColor color = model->diffuse(uvP);
-                image.set(P.x, P.y, TGAColor(color.r * intensity, color.g * intensity, color.b * intensity));
+                image.set(P.x, P.y, TGAColor(color.r, color.g, color.b) * intensity);
             }
         }
     }
 }
 
+////////////////////////////////////////////////////////////////////////
+
 int main(int argc, char **argv)
 {
+    // Initialize model and buffers
     if (2 == argc)
     {
         model = new Model(argv[1]);
@@ -114,42 +144,52 @@ int main(int argc, char **argv)
         zbuffer[i] = std::numeric_limits<int>::min();
     }
 
-    { // draw the model
+    // Draw the model
+    {
+        // Camera (ModelView) to perspective (Projection) to screen (ViewPort)
+        Matrix ModelView = lookat(eye, center, Vec3f(0, 1, 0));
         Matrix Projection = Matrix::identity(4);
         Matrix ViewPort = viewport(width / 8, height / 8, width * 3 / 4, height * 3 / 4);
-        Projection[3][2] = -1.f / camera.z;
+        Projection[3][2] = -1.f / (eye - center).norm();
+        Matrix z = (ViewPort * Projection * ModelView);
 
+        // Debug statements
+        std::cerr << ModelView << std::endl;
+        std::cerr << Projection << std::endl;
+        std::cerr << ViewPort << std::endl;
+        std::cerr << z << std::endl;
+
+        // Drawing triangles
         TGAImage image(width, height, TGAImage::RGB);
         for (int i = 0; i < model->nfaces(); i++)
         {
             std::vector<int> face = model->face(i);
             Vec3i screen_coords[3];
             Vec3f world_coords[3];
+            float intensity[3];
+
             for (int j = 0; j < 3; j++)
             {
                 Vec3f v = model->vert(face[j]);
-                screen_coords[j] = m2v(ViewPort * Projection * v2m(v));
+                screen_coords[j] = m2v(z * v2m(v));
                 world_coords[j] = v;
+                intensity[j] = model->norm(i, j) * light_dir;
             }
-            Vec3f n = (world_coords[2] - world_coords[0]) ^ (world_coords[1] - world_coords[0]);
-            n.normalize();
-            float intensity = n * light_dir;
-            if (intensity > 0)
+
+            Vec2i uv[3];
+            for (int k = 0; k < 3; k++)
             {
-                Vec2i uv[3];
-                for (int k = 0; k < 3; k++)
-                {
-                    uv[k] = model->uv(i, k);
-                }
-                triangle(screen_coords, uv, image, intensity, zbuffer);
+                uv[k] = model->uv(i, k);
             }
+            triangle(screen_coords, uv, intensity, image, zbuffer);
         }
 
         image.flip_vertically(); // i want to have the origin at the left bottom corner of the image
         image.write_tga_file("output.tga");
     }
 
-    { // dump z-buffer (debugging purposes only)
+    // Dump the z-buffer for debugging
+    {
         TGAImage zbimage(width, height, TGAImage::GRAYSCALE);
         for (int i = 0; i < width; i++)
         {
