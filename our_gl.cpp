@@ -9,7 +9,7 @@
 Matrix ModelView;
 Matrix Viewport;
 Matrix Projection;
-int DEPTH;
+float DEPTH = 255.;
 IShader::~IShader()
 {
 }
@@ -91,7 +91,7 @@ void triangle(Vec4f *pts, IShader &shader, TGAImage &image, TGAImage &zbuffer)
 
             // Depth and stencil
             // Don't render if the z-buffer is closer or outside the triangle
-            int frag_depth = std::max(0, std::min(DEPTH, int(z / w + .5)));
+            int frag_depth = std::max(0, std::min(int(DEPTH), int(z / w + .5)));
             if (c.x < 0 || c.y < 0 || c.z < 0 || zbuffer.get(P.x, P.y)[0] > frag_depth)
                 continue;
 
