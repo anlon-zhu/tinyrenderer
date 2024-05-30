@@ -258,6 +258,19 @@ public:
         return ret;
     }
 
+    mat<DimRows, DimCols, T> invert()
+    {
+        return invert_transpose().transpose();
+    }
+
+    mat<DimCols, DimRows, T> transpose()
+    {
+        mat<DimCols, DimRows, T> ret;
+        for (size_t i = DimCols; i--; ret[i] = this->col(i))
+            ;
+        return ret;
+    }
+
     mat<DimRows, DimCols, T> invert_transpose()
     {
         mat<DimRows, DimCols, T> ret = adjugate();
